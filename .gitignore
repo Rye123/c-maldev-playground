@@ -1,0 +1,10 @@
+# Output
+*.exe
+*.pdb
+
+# Build Results
+Debug/
+Release/
+Releases/
+x64/
+x86/
