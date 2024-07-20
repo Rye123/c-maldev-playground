@@ -31,17 +31,61 @@ const unsigned char shellcode[] = {
 	0xDA, 0xFF, 0xD5, 0x63, 0x61, 0x6C, 0x63, 0x00
 };
 
-// XORs all characters inplace against a variable length key
-VOID encXor(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen)
+
+/* ENCRYPTION ALGORITHMS */
+
+// XORs all characters inplace against a variable length key with a slight modification
+VOID xorEnc(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen)
 {
 	for (SIZE_T i = 0; i < srcLen; i++)
 		src[i] = src[i] ^ (key[i % keyLen] + i);
 }
 
 
+typedef struct {
+	unsigned char s[256];
+	SIZE_T i, j;
+} rc4_state;
+
+VOID rc4Init(rc4_state* state, const char* key, const SIZE_T keyLen)
+{
+	for (SIZE_T i = 0; i < 256; i++)
+		state->s[i] = i;
+	SIZE_T j = 0;
+	for (SIZE_T i = 0; i < 256; i++) {
+		j = (j + state->s[i] + key[i % keyLen]) % 256;
+		state->s[i], state->s[j] = state->s[j], state->s[i];
+	}
+	state->i, state->j = 0, 0;
+}
+
+VOID rc4Enc(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen)
+{
+	// Initialise RC4 state
+	rc4_state state = { 0 };
+	rc4Init(&state, key, keyLen);
+
+	for (SIZE_T idx = 0; idx < srcLen; idx++) {
+		unsigned char k;
+
+		// Generate pseudorandom key byte by rotating rc4 state
+		state.i = (state.i + 1) % 256;
+		state.j = (state.j + state.s[state.i]) % 256;
+		state.s[state.i], state.s[state.j] = state.s[state.j], state.s[state.i];
+		SIZE_T kIdx = (state.s[state.i] + state.s[state.j]) % 256;
+		k = state.s[kIdx];
+
+		// XOR with the source
+		src[idx] = src[idx] ^ k;
+	}
+}
+
+/* MAIN FUNCTION */
 int main()
 {
-	if (!validateEncryptDecrypt(&encXor, &encXor))
+	if (!validateEncryptDecrypt(&xorEnc, &xorEnc))
+		return 1;
+	if (!validateEncryptDecrypt(&rc4Enc, &rc4Enc))
 		return 1;
 
 	CHAR* buf = (CHAR*)malloc(sizeof(shellcode) * sizeof(char));
@@ -49,7 +93,7 @@ int main()
 		return 1;
 	memcpy(buf, shellcode, sizeof(shellcode));
 
-	encXor("CreateThread", strlen("CreateThread"), buf, sizeof(shellcode));  // password is "CreateThread"
+	rc4Enc("CreateThread", strlen("CreateThread"), buf, sizeof(shellcode));  // password is "CreateThread"
 	shellcodeDump(buf, sizeof(shellcode));
 	return 0;
 }
