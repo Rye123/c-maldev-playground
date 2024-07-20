@@ -40,6 +40,7 @@ BOOL validateEncryptDecrypt(
 		encrypt(key, keyLen, buf, dataLen);
 		if (memcmp(buf, data, dataLen) == 0) {
 			printf("[V] Round %lld: FAILED. Encrypted bytes match plaintext.\n", i);
+			printf("\tKey: "); hexdump(key, keyLen); printf("\n");
 			printf("\tPlaintext: "); hexdump(data, dataLen); printf("\n");
 			printf("\tEncrypted: "); hexdump(buf, dataLen); printf("\n");
 			return FALSE;
@@ -49,6 +50,7 @@ BOOL validateEncryptDecrypt(
 		decrypt(key, keyLen, buf, dataLen);
 		if (memcmp(buf, data, dataLen) != 0) {
 			printf("[V] Round %lld: FAILED. Decrypted bytes don't match plaintext.\n", i);
+			printf("\tKey: "); hexdump(key, keyLen); printf("\n");
 			printf("\tPlaintext: "); hexdump(data, dataLen); printf("\n");
 			printf("\tDecrypted: "); hexdump(buf, dataLen); printf("\n");
 			return FALSE;
