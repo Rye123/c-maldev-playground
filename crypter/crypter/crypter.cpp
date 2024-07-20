@@ -2,6 +2,16 @@
 #include <stdlib.h>
 #include <windows.h>
 
+// Validation details. Enable VALIDATION_DEBUG to see debug output, but it's not necessary to 
+// test the encryption algorithm. If the algorithm is wrong, the validator will report it even
+// if VALIDATION_DEBUG is false.
+#define VALIDATION_DEBUG FALSE
+#define VALIDATION_ROUNDS 25  // How many rounds of validation to do on the encryption algorithm
+#define VALIDATION_DATA_MAXLEN 1024
+#define VALIDATION_DATA_MINLEN 1
+#define VALIDATION_KEY_MAXLEN 255
+#define VALIDATION_KEY_MINLEN 1
+
 // Shellcode that pops a calculator
 const unsigned char shellcode[] = {
 	0xFC, 0x48, 0x83, 0xE4, 0xF0, 0xE8, 0xC0, 0x00, 0x00, 0x00, 0x41, 0x51,
@@ -30,31 +40,103 @@ const unsigned char shellcode[] = {
 };
 
 // XORs all characters inplace against a variable length key
-VOID fnXorKeyMod(const char* key, char* src, const SIZE_T srcLen)
+VOID encXor(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen)
 {
 	for (SIZE_T i = 0; i < srcLen; i++)
-		src[i] = src[i] ^ (key[i % strlen(key)] + i);
+		src[i] = src[i] ^ (key[i % keyLen] + i);
 }
 
-VOID hexdump(const char* s, const SIZE_T sLen)
+// Dumps the hex-encoded shellcode
+VOID shellcodeDump(const char* s, const SIZE_T sLen)
 {
 	printf("{");
 	for (SIZE_T i = 0; i < sLen; i++) {
-		printf("0x%02x", ((unsigned int)s[i]) & 255);
+		printf("0x%02x", ((unsigned int)s[i]) & 0xFF);
 		if (i + 1 != sLen)
 			printf(", ");
 	}
 	printf("}\n");
 }
 
+// Provides a hexdump of the given data
+VOID hexdump(const char* s, const SIZE_T sLen)
+{
+	for (SIZE_T i = 0; i < sLen; i++) {
+		printf("%02x", ((unsigned int)s[i]) & 0xFF);
+		if (i + 1 != sLen)
+			printf(" ");
+	}
+}
+
+// Validate encryption and decryption methods return the same data.
+BOOL validateEncryptDecrypt(
+	VOID(*encrypt)(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen),
+	VOID(*decrypt)(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen)
+) {
+	SIZE_T dataLen = 0;
+	SIZE_T keyLen = 0;
+	char* data;
+	char *key;
+
+	for (SIZE_T i = 0; i < VALIDATION_ROUNDS; i++) {
+		// Initialisation
+		dataLen = rand() % (VALIDATION_DATA_MAXLEN + 1 - VALIDATION_DATA_MINLEN) + VALIDATION_DATA_MINLEN;
+		keyLen = rand() % (VALIDATION_KEY_MAXLEN + 1 - VALIDATION_KEY_MINLEN) + VALIDATION_KEY_MINLEN;
+		data = (char *) malloc(dataLen * sizeof(char));
+		key = (char *) malloc(keyLen * sizeof(char));
+		if (VALIDATION_DEBUG)
+			printf("[V] Round %d: Data length %lld, key length %lld\n", i, dataLen, keyLen);
+
+		// Populate data and key with random data
+		for (SIZE_T j = 0; j < dataLen; j++)
+			data[j] = rand() % 256;
+		for (SIZE_T j = 0; j < keyLen; j++)
+			key[j] = rand() % 256;
+		if (VALIDATION_DEBUG) {
+			printf("[V] Round %d:\n", i);
+			printf("\tPlaintext: "); hexdump(data, dataLen); printf("\n");
+			printf("\tKey: "); hexdump(key, keyLen); printf("\n");
+		}
+
+		// Start tests
+		CHAR* buf = (CHAR*)malloc(dataLen * sizeof(char));
+		memcpy(buf, data, dataLen);
+
+		// 1. Assert that encrypted bytes differ
+		encrypt(key, keyLen, buf, dataLen);
+		if (memcmp(buf, data, dataLen) == 0) {
+			printf("[V] Round %d: FAILED. Encrypted bytes match plaintext.\n", i);
+			printf("\tPlaintext: "); hexdump(data, dataLen); printf("\n");
+			printf("\tEncrypted: "); hexdump(buf, dataLen); printf("\n");
+			return FALSE;
+		}
+
+		// 2. Assert that decrypted bytes are the same as original bytes
+		decrypt(key, keyLen, buf, dataLen);
+		if (memcmp(buf, data, dataLen) != 0) {
+			printf("[V] Round %d: FAILED. Decrypted bytes don't match plaintext.\n", i);
+			printf("\tPlaintext: "); hexdump(data, dataLen); printf("\n");
+			printf("\tDecrypted: "); hexdump(buf, dataLen); printf("\n");
+			return FALSE;
+		}
+
+		if (VALIDATION_DEBUG)
+			printf("[V] Round %d: PASSED.\n", i);
+	}
+	return TRUE;
+}
+
 int main()
 {
+	if (!validateEncryptDecrypt(&encXor, &encXor))
+		return 1;
+
 	CHAR* buf = (CHAR*)malloc(sizeof(shellcode) * sizeof(char));
 	if (buf == NULL)
 		return 1;
 	memcpy(buf, shellcode, sizeof(shellcode));
 
-	fnXorKeyMod("CreateThread", buf, sizeof(shellcode));  // password is "CreateThread"
-	hexdump(buf, sizeof(shellcode));
+	encXor("CreateThread", strlen("CreateThread"), buf, sizeof(shellcode));  // password is "CreateThread"
+	shellcodeDump(buf, sizeof(shellcode));
 	return 0;
 }
