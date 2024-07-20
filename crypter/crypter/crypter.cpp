@@ -34,6 +34,7 @@ const unsigned char shellcode[] = {
 
 /* ENCRYPTION ALGORITHMS */
 
+// 1. XOR
 // XORs all characters inplace against a variable length key with a slight modification
 VOID xorEnc(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen)
 {
@@ -41,6 +42,7 @@ VOID xorEnc(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen
 		src[i] = src[i] ^ (key[i % keyLen] + i);
 }
 
+// 2. RC4
 
 typedef struct {
 	unsigned char s[256];
@@ -80,12 +82,51 @@ VOID rc4Enc(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen
 	}
 }
 
+// 3. RC4 Undocumented
+typedef struct {
+	DWORD Length;
+	DWORD MaximumLength;
+	PVOID Buffer;
+} USTRING;
+typedef NTSTATUS(NTAPI* fpSystemFunction032)(USTRING* data, const USTRING* key);
+
+void rc4Enc_undoc(const char* key, const SIZE_T keyLen, char* src, const SIZE_T srcLen)
+{
+	// Load NTDLL
+	const char aAdvpi32[] = "advapi32.dll";
+	HMODULE hAdvpi32 = GetModuleHandleA(aAdvpi32);
+	if (hAdvpi32 == NULL) hAdvpi32 = LoadLibraryA(aAdvpi32);
+	if (hAdvpi32 == NULL) exit(GetLastError());
+	
+	// Load SystemFunction032
+	PVOID pSystemFunction032 = GetProcAddress(hAdvpi32, "SystemFunction032");
+	fpSystemFunction032 SystemFunction032 = (fpSystemFunction032)pSystemFunction032;
+	if (SystemFunction032 == NULL) exit(GetLastError());
+
+	// Initialise arguments
+	USTRING* uData = (USTRING*) malloc(sizeof(USTRING));
+	USTRING* uKey = (USTRING*)malloc(sizeof(USTRING));
+	uData->Length = uData->MaximumLength = srcLen;
+	uData->Buffer = (PVOID)src;
+	uKey->Length = uKey->MaximumLength = keyLen;
+	uKey->Buffer = (PVOID)key;
+
+	// Run function
+	NTSTATUS result = SystemFunction032(uData, uKey);
+	if (result < 0) exit(result);
+	
+	// Update src
+	memcpy(src, uData->Buffer, srcLen);
+}
+
 /* MAIN FUNCTION */
 int main()
 {
-	if (!validateEncryptDecrypt(&xorEnc, &xorEnc))
-		return 1;
-	if (!validateEncryptDecrypt(&rc4Enc, &rc4Enc))
+	//if (!validateEncryptDecrypt(&xorEnc, &xorEnc))
+	//	return 1;
+	//if (!validateEncryptDecrypt(&rc4Enc, &rc4Enc))
+	//	return 1;
+	if (!validateEncryptDecrypt(&rc4Enc_undoc, &rc4Enc_undoc))
 		return 1;
 
 	CHAR* buf = (CHAR*)malloc(sizeof(shellcode) * sizeof(char));
@@ -93,7 +134,7 @@ int main()
 		return 1;
 	memcpy(buf, shellcode, sizeof(shellcode));
 
-	rc4Enc("CreateThread", strlen("CreateThread"), buf, sizeof(shellcode));  // password is "CreateThread"
+	rc4Enc_undoc("CreateThread", strlen("CreateThread"), buf, sizeof(shellcode));  // password is "CreateThread"
 	shellcodeDump(buf, sizeof(shellcode));
 	return 0;
 }
